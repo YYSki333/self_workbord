@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.19)
-project(tomoss LANGUAGES CXX)
+
+# Semantic version — bump here only (MAJOR.MINOR.PATCH)
+# See AGENTS.md for bump rules.
+project(tomoss VERSION 0.1.0 LANGUAGES CXX)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
 
@@ -13,6 +16,7 @@ qt_add_executable(tomoss
     src/mainwindow.cpp
     src/mainwindow.h
     src/core/traceframe.h
+    src/core/appversion.h
     src/core/linutil.h
     src/core/devicemanager.cpp
     src/core/devicemanager.h
@@ -26,11 +30,17 @@ qt_add_executable(tomoss
     src/ui/linconfigpanel.h
     src/ui/linsendpanel.cpp
     src/ui/linsendpanel.h
+    src/ui/uifont.h
 )
 
 target_include_directories(tomoss PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${USB2XXX_ROOT}/include
+)
+
+# Expose semver to code (window title, QCoreApplication::applicationVersion)
+target_compile_definitions(tomoss PRIVATE
+    TOMOSS_VERSION="${PROJECT_VERSION}"
 )
 
 target_link_libraries(tomoss

@@ -37,12 +37,27 @@ POST_BUILD copies USB2XXX DLLs next to `tomoss.exe`. Link is hardcoded to `3rdpa
 - No Linux/mac SDK variants are vendored yet — Windows x64 only.
 - Runtime needs DLLs beside the exe (handled by CMake POST_BUILD). `USB2XXX_EX.*` is not linked.
 
+## Versioning (semver)
+
+**Single source of truth:** `project(tomoss VERSION x.y.z)` in `CMakeLists.txt`.
+
+- Exposed as `TOMOSS_VERSION` → `version::semver()` (`src/core/appversion.h`)
+- Shown in window title and `QApplication::applicationVersion`
+- Bump rules:
+  - **PATCH** `z` — bugfix only
+  - **MINOR** `y` — new feature, backward compatible (e.g. add CAN page)
+  - **MAJOR** `x` — breaking UI/API or settings format change
+- After bump: reconfigure CMake (`cmake -S . -B …`) so the define updates
+- Release tags: `vX.Y.Z` on the commit that shipped the bump
+
+Current: see `CMakeLists.txt` `project(... VERSION …)`.
+
 ## Tests / lint / CI
 
 **None.** Verification = configure + link cleanly; optionally launch with device attached.
 
 ## Conventions
 
-- Classic Qt Widgets split: UI in `src/mainwindow.ui`, logic in `MainWindow`.
-- C API usage follows upstream examples: `#include "usb_device.h"` / `"usb2can.h"` etc. (same include dir).
+- Programmatic UI under `src/ui/*`; shell wiring in `MainWindow` (no `.ui` form).
+- C API usage follows upstream examples: `#include "usb_device.h"` / `"usb2lin_ex.h"` etc.
 - Scope: Qt Core+Widgets + USB2XXX C API only — do not add modules unless the task requires them.

@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 
+#include "core/appversion.h"
 #include "core/devicemanager.h"
 #include "core/lincontroller.h"
 #include "core/linutil.h"
@@ -135,7 +136,8 @@ void MainWindow::buildUi()
     mainLayout->addWidget(right, 1);
 
     setCentralWidget(central);
-    setWindowTitle(tr("tomoss — LIN Trace"));
+    setWindowTitle(tr("tomoss — LIN Trace · v%1")
+                       .arg(QString::fromLatin1(version::semver())));
     resize(1100, 720);
 }
 
