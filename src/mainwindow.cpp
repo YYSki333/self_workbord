@@ -12,6 +12,7 @@
 #include <QDateTime>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QListWidget>
 #include <QMessageBox>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -38,17 +39,18 @@ MainWindow::MainWindow(QWidget *parent)
         m_devices->closeAll();
         m_devicePanel->clearDevices();
         m_linConfig->setBusy(false);
+        updateDeviceBadge();
         setStatus(tr("设备已关闭"));
     });
-    connect(m_devicePanel, &DevicePanel::deviceSelected, this,
-            [this](int) {
-                for (const DeviceEntry &e : m_devicePanel->devices()) {
-                    if (e.handle == m_devicePanel->currentHandle()) {
-                        m_linConfig->setChannelCount(e.linChCount);
-                        break;
-                    }
-                }
-            });
+    connect(m_devicePanel, &DevicePanel::deviceSelected, this, [this](int) {
+        for (const DeviceEntry &e : m_devicePanel->devices()) {
+            if (e.handle == m_devicePanel->currentHandle()) {
+                m_linConfig->setChannelCount(e.linChCount);
+                break;
+            }
+        }
+        updateDeviceBadge();
+    });
 
     connect(m_linConfig, &LinConfigPanel::startRequested, this,
             &MainWindow::onStartLin);
@@ -61,7 +63,6 @@ MainWindow::MainWindow(QWidget *parent)
             &MainWindow::onReadLin);
     connect(m_linSend, &LinSendPanel::statusText, this,
             [this](const QString &t) { setStatus(t); });
-
     connect(m_linSend, &LinSendPanel::listItemRequested, this,
             &MainWindow::onListItem);
 
@@ -78,7 +79,7 @@ MainWindow::MainWindow(QWidget *parent)
         m_devicePanel->setBusy(false);
     });
 
-    setStatus(tr("请扫描设备，配置 LIN 后启动；可用「列表发送」多条/循环。"));
+    setStatus(tr("图莫斯 → 设备扫描 / LIN / 英迪芯标定；其它 → J-Link。"));
 }
 
 MainWindow::~MainWindow()
@@ -96,49 +97,234 @@ void MainWindow::buildUi()
 
     auto *side = new QWidget;
     side->setObjectName(QStringLiteral("sidebar"));
-    side->setMinimumWidth(260);
-    side->setMaximumWidth(300);
+    side->setMinimumWidth(230);
+    side->setMaximumWidth(280);
     side->setStyleSheet(QStringLiteral(
         "QWidget#sidebar { border-right: 1px solid palette(mid); }"));
     auto *sideLayout = new QVBoxLayout(side);
-    sideLayout->setContentsMargins(12, 12, 12, 12);
-    sideLayout->setSpacing(8);
+    sideLayout->setContentsMargins(10, 12, 10, 12);
+    sideLayout->setSpacing(4);
+
+    auto makeHeader = [](const QString &text) {
+        auto *item = new QListWidgetItem(text);
+        item->setFlags(Qt::ItemIsEnabled);
+        QFont f = item->font();
+        f.setBold(true);
+        item->setFont(f);
+        return item;
+    };
+
+    // 图莫斯 → 设备扫描 / LIN / 英迪芯标定；其它 → J-Link
+    m_nav = new QListWidget;
+    m_nav->setFrameShape(QFrame::NoFrame);
+    m_nav->addItem(makeHeader(tr("图莫斯")));
+    m_nav->addItem(tr("  设备扫描"));
+    m_nav->addItem(tr("  LIN 总线"));
+    m_nav->addItem(tr("  英迪芯标定"));
+    m_nav->addItem(makeHeader(tr("其它")));
+    m_nav->addItem(tr("  J-Link 烧录"));
+    m_nav->setCurrentRow(RowDevice);
+    sideLayout->addWidget(m_nav, 1);
+
+    // —— 页面栈 ——
+    m_pages = new QStackedWidget;
+    m_pages->addWidget(buildDevicePage());
+    m_pages->addWidget(buildLinPage());
+    m_pages->addWidget(buildIndieCalPage());
+    m_pages->addWidget(buildJlinkPage());
+
+    mainLayout->addWidget(side);
+    mainLayout->addWidget(m_pages, 1);
+
+    setCentralWidget(central);
+    setWindowTitle(tr("tomoss — 设备扫描 · v%1")
+                       .arg(QString::fromLatin1(version::semver())));
+    resize(1180, 740);
+
+    connect(m_nav, &QListWidget::currentRowChanged, this,
+            &MainWindow::onNavRowChanged);
+    // 初始页
+    m_pages->setCurrentIndex(PageDevice);
+}
+
+QWidget *MainWindow::buildDevicePage()
+{
+    auto *page = new QWidget;
+    auto *lay = new QVBoxLayout(page);
+    lay->setContentsMargins(24, 20, 24, 20);
+    lay->setSpacing(12);
+
+    auto *title = new QLabel(tr("图莫斯 · 设备扫描"));
+    QFont f = title->font();
+    f.setPointSize(f.pointSize() + 3);
+    f.setBold(true);
+    title->setFont(f);
+    lay->addWidget(title);
+
+    auto *hint = new QLabel(
+        tr("扫描并打开 USB2XXX 适配器；选中设备后可在「LIN 总线」页使用。"));
+    hint->setWordWrap(true);
+    lay->addWidget(hint);
 
     m_devicePanel = new DevicePanel;
-    sideLayout->addWidget(m_devicePanel);
+    // 页面内展示：加最大宽度，避免控件拉满
+    auto *wrap = new QWidget;
+    auto *wrapLay = new QVBoxLayout(wrap);
+    wrapLay->setContentsMargins(0, 8, 0, 0);
+    wrapLay->addWidget(m_devicePanel);
+    wrapLay->addStretch();
+    wrap->setMaximumWidth(480);
+    lay->addWidget(wrap, 0, Qt::AlignLeft);
+    lay->addStretch();
+
+    return page;
+}
+
+QWidget *MainWindow::buildLinPage()
+{
+    auto *page = new QWidget;
+    auto *lay = new QHBoxLayout(page);
+    lay->setContentsMargins(0, 0, 0, 0);
+    lay->setSpacing(0);
+
+    auto *left = new QVBoxLayout;
+    left->setContentsMargins(8, 8, 8, 8);
+    left->setSpacing(6);
+
+    m_deviceBadge = new QLabel;
+    m_deviceBadge->setWordWrap(true);
+    m_deviceBadge->setStyleSheet(QStringLiteral("font-size:12px;"));
+    left->addWidget(m_deviceBadge);
+
+    m_linConfig = new LinConfigPanel;
+    m_linConfig->setMinimumWidth(200);
+    m_linConfig->setMaximumWidth(250);
+    left->addWidget(m_linConfig);
+    left->addStretch();
+
+    auto *leftWrap = new QWidget;
+    leftWrap->setLayout(left);
+    leftWrap->setMinimumWidth(220);
+    leftWrap->setMaximumWidth(270);
+    lay->addWidget(leftWrap);
 
     auto *sep = new QWidget;
-    sep->setFixedHeight(1);
+    sep->setFixedWidth(1);
     sep->setStyleSheet(QStringLiteral("background:palette(mid);"));
-    sideLayout->addWidget(sep);
-
-    m_protocolStack = new QStackedWidget;
-    m_linConfig = new LinConfigPanel;
-    m_protocolStack->addWidget(m_linConfig);
-    sideLayout->addWidget(m_protocolStack);
-    sideLayout->addStretch();
+    lay->addWidget(sep);
 
     auto *center = new QVBoxLayout;
     center->setContentsMargins(0, 0, 0, 0);
     center->setSpacing(0);
-
     m_trace = new TracePanel;
     center->addWidget(m_trace, 1);
-
-    m_sendStack = new QStackedWidget;
     m_linSend = new LinSendPanel;
-    m_sendStack->addWidget(m_linSend);
-    center->addWidget(m_sendStack);
+    center->addWidget(m_linSend);
 
-    mainLayout->addWidget(side);
     auto *right = new QWidget;
     right->setLayout(center);
-    mainLayout->addWidget(right, 1);
+    lay->addWidget(right, 1);
 
-    setCentralWidget(central);
-    setWindowTitle(tr("tomoss — LIN Trace · v%1")
-                       .arg(QString::fromLatin1(version::semver())));
-    resize(1100, 720);
+    return page;
+}
+
+QWidget *MainWindow::buildIndieCalPage()
+{
+    auto *page = new QWidget;
+    auto *lay = new QVBoxLayout(page);
+    lay->setContentsMargins(32, 32, 32, 32);
+    lay->setSpacing(12);
+
+    auto *title = new QLabel(tr("英迪芯标定"));
+    QFont f = title->font();
+    f.setPointSize(f.pointSize() + 4);
+    f.setBold(true);
+    title->setFont(f);
+    lay->addWidget(title);
+
+    auto *hint = new QLabel(
+        tr("该子页面规划中：英迪芯（Indie）传感器标定流程。\n"
+           "属于「图莫斯」分类，与设备扫描 / LIN 共用已打开的适配器。"));
+    hint->setWordWrap(true);
+    lay->addWidget(hint);
+    lay->addStretch();
+    return page;
+}
+
+QWidget *MainWindow::buildJlinkPage()
+{
+    auto *page = new QWidget;
+    auto *lay = new QVBoxLayout(page);
+    lay->setContentsMargins(32, 32, 32, 32);
+    lay->setSpacing(12);
+
+    auto *title = new QLabel(tr("J-Link 烧录"));
+    QFont f = title->font();
+    f.setPointSize(f.pointSize() + 4);
+    f.setBold(true);
+    title->setFont(f);
+    lay->addWidget(title);
+
+    auto *hint = new QLabel(
+        tr("该子页面规划中：连接 J-Link、选择目标 MCU、烧录 ELF/BIN 等。\n"
+           "与图莫斯设备/LIN 无关，通过左侧「其它」导航进入。"));
+    hint->setWordWrap(true);
+    lay->addWidget(hint);
+    lay->addStretch();
+    return page;
+}
+
+void MainWindow::onNavRowChanged(int row)
+{
+    if (m_navGuard)
+        return;
+    // 分组标题不可选，但若被选中则弹回
+    if (row == RowTomHeader || row == RowOtherHeader) {
+        m_navGuard = true;
+        m_nav->setCurrentRow(row == RowTomHeader ? RowDevice : RowJlink);
+        m_navGuard = false;
+        return;
+    }
+
+    if (row == RowDevice) {
+        m_pages->setCurrentIndex(PageDevice);
+        setWindowTitle(tr("tomoss — 设备扫描 · v%1")
+                           .arg(QString::fromLatin1(version::semver())));
+        setStatus(tr("图莫斯 · 设备扫描"));
+    } else if (row == RowLin) {
+        m_pages->setCurrentIndex(PageLin);
+        updateDeviceBadge();
+        setWindowTitle(tr("tomoss — LIN · v%1")
+                           .arg(QString::fromLatin1(version::semver())));
+        setStatus(tr("图莫斯 · LIN 总线"));
+    } else if (row == RowIndieCal) {
+        m_pages->setCurrentIndex(PageIndieCal);
+        setWindowTitle(tr("tomoss — 英迪芯标定 · v%1")
+                           .arg(QString::fromLatin1(version::semver())));
+        setStatus(tr("图莫斯 · 英迪芯标定（开发中）"));
+    } else if (row == RowJlink) {
+        m_pages->setCurrentIndex(PageJlink);
+        setWindowTitle(tr("tomoss — J-Link · v%1")
+                           .arg(QString::fromLatin1(version::semver())));
+        setStatus(tr("其它 · J-Link 烧录（开发中）"));
+    }
+}
+
+void MainWindow::updateDeviceBadge()
+{
+    if (!m_deviceBadge)
+        return;
+    if (!m_devicePanel->hasDevice()) {
+        m_deviceBadge->setText(
+            tr("设备：未扫描 — 请到「图莫斯 → 设备扫描」"));
+        return;
+    }
+    const int h = m_devicePanel->currentHandle();
+    m_deviceBadge->setText(
+        tr("设备：0x%1（可在设备扫描页切换）")
+            .arg(QString::number(h, 16)
+                     .rightJustified(8, QLatin1Char('0'))
+                     .toUpper()));
 }
 
 void MainWindow::syncDeviceUi()
@@ -157,6 +343,7 @@ void MainWindow::syncDeviceUi()
         m_devicePanel->setInfoText(tr("未发现设备"));
         m_linConfig->setBusy(false);
     }
+    updateDeviceBadge();
 }
 
 void MainWindow::onStartLin()
@@ -168,7 +355,13 @@ void MainWindow::onStartLin()
 
     const int handle = m_devicePanel->currentHandle();
     if (handle < 0) {
-        QMessageBox::warning(this, tr("提示"), tr("请先扫描并选择设备。"));
+        QMessageBox::warning(
+            this, tr("提示"),
+            tr("请先在「图莫斯 → 设备扫描」中扫描并选择设备。"));
+        m_navGuard = true;
+        m_nav->setCurrentRow(RowDevice);
+        m_navGuard = false;
+        onNavRowChanged(RowDevice);
         return;
     }
 

@@ -8,16 +8,15 @@ class LinConfigPanel;
 class LinController;
 class LinSendPanel;
 class TracePanel;
+class QListWidget;
 class QStackedWidget;
+class QLabel;
 
-// 完整类型在 cpp 中 include；此处前置声明不够用于槽参数
 #include "ui/linsendpanel.h"
 
 /**
- * 应用外壳：
- * - 左栏 = DevicePanel + 协议配置栈（LIN，后续可插 CAN/PWM）
- * - 主区 = TracePanel + 发送栈（LinSendPanel：单条 + 列表/循环）
- * 业务在 DeviceManager / LinController，窗口只接线。
+ * 左侧导航（分组子菜单）+ 右侧页面栈：
+ * 图莫斯 → 设备扫描、LIN 总线、英迪芯标定；其它 → J-Link 烧录。
  */
 class MainWindow : public QMainWindow
 {
@@ -34,10 +33,32 @@ private slots:
     void onWriteListLine(int id, unsigned char check, const QString &dataHex);
     void onReadListLine(int id, unsigned char check);
     void onListItem(const LinSendPanel::ListItem &item);
+    void onNavRowChanged(int row);
 
 private:
+    enum PageId {
+        PageDevice = 0,
+        PageLin = 1,
+        PageIndieCal = 2,
+        PageJlink = 3,
+    };
+    // nav row → page（含不可选分组标题行）
+    enum NavRow {
+        RowTomHeader = 0,
+        RowDevice = 1,
+        RowLin = 2,
+        RowIndieCal = 3,
+        RowOtherHeader = 4,
+        RowJlink = 5,
+    };
+
     void buildUi();
+    QWidget *buildDevicePage();
+    QWidget *buildLinPage();
+    QWidget *buildIndieCalPage();
+    QWidget *buildJlinkPage();
     void syncDeviceUi();
+    void updateDeviceBadge();
     void appendLocalFrame(bool isTx, int ch, const QString &type,
                           int id, unsigned char pid, int dlc,
                           const QString &dataPart, const QString &checkPart);
@@ -46,10 +67,12 @@ private:
     DeviceManager *m_devices = nullptr;
     LinController *m_lin = nullptr;
     DevicePanel *m_devicePanel = nullptr;
+    QListWidget *m_nav = nullptr;
+    QStackedWidget *m_pages = nullptr;
     LinConfigPanel *m_linConfig = nullptr;
     TracePanel *m_trace = nullptr;
     LinSendPanel *m_linSend = nullptr;
-    QStackedWidget *m_protocolStack = nullptr;
-    QStackedWidget *m_sendStack = nullptr;
+    QLabel *m_deviceBadge = nullptr;
     bool m_linRunning = false;
+    bool m_navGuard = false;
 };
