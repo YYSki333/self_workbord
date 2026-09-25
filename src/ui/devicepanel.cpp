@@ -67,12 +67,19 @@ void DevicePanel::setDevices(const QVector<DeviceEntry> &devices)
 
 int DevicePanel::currentHandle() const
 {
-    return m_combo->currentData().toInt();
+    // 未选中/空列表时必须返回 -1：QVariant 空 toInt() 为 0，会误当有效句柄
+    if (!m_combo || m_combo->count() <= 0 || m_combo->currentIndex() < 0)
+        return -1;
+    const QVariant v = m_combo->currentData();
+    if (!v.isValid())
+        return -1;
+    const int h = v.toInt();
+    return h < 0 ? -1 : h;
 }
 
 bool DevicePanel::hasDevice() const
 {
-    return !m_devices.isEmpty();
+    return !m_devices.isEmpty() && currentHandle() >= 0;
 }
 
 void DevicePanel::setInfoText(const QString &text)

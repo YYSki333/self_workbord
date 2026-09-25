@@ -57,6 +57,8 @@ private:
     QWidget *buildLinPage();
     QWidget *buildIndieCalPage();
     QWidget *buildJlinkPage();
+    /** 未扫描/无效句柄时提示并跳到设备扫描页，返回 false。 */
+    bool requireDeviceForLin();
     void syncDeviceUi();
     void updateDeviceBadge();
     void appendLocalFrame(bool isTx, int ch, const QString &type,

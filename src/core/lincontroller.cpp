@@ -24,6 +24,14 @@ int LinController::start(int handle, int channel, int baudBps, bool master)
 {
     if (m_running)
         return LIN_EX_ERR_CMD_FAIL;
+    if (handle < 0) {
+        emit errorOccurred(tr("无效设备句柄，未启动 LIN"));
+        return LIN_EX_ERR_PARAMETER;
+    }
+    if (channel < 0 || channel > 3 || baudBps < 2000 || baudBps > 100000) {
+        emit errorOccurred(tr("LIN 参数非法（通道/波特率）"));
+        return LIN_EX_ERR_PARAMETER;
+    }
 
     const int ret =
         LIN_EX_Init(handle, static_cast<unsigned char>(channel),
@@ -66,9 +74,14 @@ int LinController::write(int handle, int channel, unsigned char id,
                          const unsigned char *data, int len,
                          unsigned char checkType)
 {
+    if (!m_running || handle < 0 || !data || len < 0 || len > 8)
+        return LIN_EX_ERR_PARAMETER;
+    if (channel != m_channel || handle != m_handle)
+        return LIN_EX_ERR_PARAMETER;
+
     const unsigned char pid = calcPid(id);
     // 写期间暂停轮询，避免与 MasterWrite 抢 USB
-    const bool resumePoll = m_running && m_timerId != 0;
+    const bool resumePoll = m_timerId != 0;
     if (resumePoll) {
         killTimer(m_timerId);
         m_timerId = 0;
@@ -85,9 +98,14 @@ int LinController::write(int handle, int channel, unsigned char id,
 int LinController::read(int handle, int channel, unsigned char id,
                         unsigned char *outData, int maxLen)
 {
+    if (!m_running || handle < 0 || !outData || maxLen <= 0)
+        return LIN_EX_ERR_PARAMETER;
+    if (channel != m_channel || handle != m_handle)
+        return LIN_EX_ERR_PARAMETER;
+
     const unsigned char pid = calcPid(id);
     unsigned char buf[8] = {};
-    const bool resumePoll = m_running && m_timerId != 0;
+    const bool resumePoll = m_timerId != 0;
     if (resumePoll) {
         killTimer(m_timerId);
         m_timerId = 0;
@@ -114,6 +132,9 @@ void LinController::timerEvent(QTimerEvent *event)
 
 void LinController::poll()
 {
+    if (!m_running || m_handle < 0)
+        return;
+
     LIN_EX_MSG msgs[128];
     TraceFrameList out;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -122,11 +143,15 @@ void LinController::poll()
     if (!m_master) {
         n = LIN_EX_SlaveGetData(m_handle,
                                 static_cast<unsigned char>(m_channel), msgs);
+        if (n < 0)
+            n = 0;
         for (int i = 0; i < n; ++i)
             out.append(toFrame(msgs[i], m_channel, now, false));
     } else {
         n = LIN_EX_GetMsg(m_handle, static_cast<unsigned char>(m_channel),
                           msgs, 128);
+        if (n < 0)
+            n = 0;
         for (int i = 0; i < n; ++i) {
             const bool tx = msgs[i].MsgType == LIN_EX_MSG_TYPE_MW
                             || msgs[i].MsgType == LIN_EX_MSG_TYPE_SW;

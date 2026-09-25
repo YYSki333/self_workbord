@@ -346,28 +346,47 @@ void MainWindow::syncDeviceUi()
     updateDeviceBadge();
 }
 
-void MainWindow::onStartLin()
+bool MainWindow::requireDeviceForLin()
 {
-    if (m_linRunning)
-        return;
-    if (!m_devicePanel->hasDevice())
-        m_devicePanel->setDevices(m_devices->entries());
-
-    const int handle = m_devicePanel->currentHandle();
-    if (handle < 0) {
-        QMessageBox::warning(
-            this, tr("提示"),
-            tr("请先在「图莫斯 → 设备扫描」中扫描并选择设备。"));
+    if (!m_devicePanel)
+        return false;
+    if (!m_devicePanel->hasDevice()) {
+        // 尝试同步一次（可能扫描后未刷新）
+        if (!m_devices->entries().isEmpty())
+            m_devicePanel->setDevices(m_devices->entries());
+    }
+    if (!m_devicePanel->hasDevice() || m_devicePanel->currentHandle() < 0) {
+        setStatus(tr("未选择设备：请先在「图莫斯 → 设备扫描」扫描"), 5000);
+        QMessageBox::information(
+            this, tr("需要设备"),
+            tr("尚未扫描/选择图莫斯设备。\n请先打开「图莫斯 → 设备扫描」。"));
         m_navGuard = true;
         m_nav->setCurrentRow(RowDevice);
         m_navGuard = false;
         onNavRowChanged(RowDevice);
-        return;
+        return false;
     }
+    return true;
+}
+
+void MainWindow::onStartLin()
+{
+    if (m_linRunning)
+        return;
+    if (!requireDeviceForLin())
+        return;
+
+    const int handle = m_devicePanel->currentHandle();
+    if (handle < 0)
+        return;
 
     const int ch = m_linConfig->channel();
     const int baud = m_linConfig->baudBps();
     const bool master = m_linConfig->isMaster();
+    if (ch < 0 || baud <= 0) {
+        setStatus(tr("LIN 配置参数非法"), 5000);
+        return;
+    }
 
     if (m_lin->start(handle, ch, baud, master) != 0)
         return;
@@ -416,6 +435,10 @@ void MainWindow::onWriteLin()
 {
     if (!m_linRunning || !m_linConfig->isMaster())
         return;
+    if (!requireDeviceForLin()) {
+        onStopLin();
+        return;
+    }
     onWriteListLine(m_linSend->sendId(), m_linSend->checkType(),
                     m_linSend->dataHex());
 }
@@ -424,6 +447,10 @@ void MainWindow::onListItem(const LinSendPanel::ListItem &item)
 {
     if (!m_linRunning || !m_linConfig->isMaster())
         return;
+    if (!requireDeviceForLin()) {
+        onStopLin();
+        return;
+    }
     if (item.direction == LinSendPanel::DirRead)
         onReadListLine(item.id, item.checkType);
     else
@@ -435,6 +462,10 @@ void MainWindow::onWriteListLine(int id, unsigned char check,
 {
     if (!m_linRunning || !m_linConfig->isMaster())
         return;
+    if (!m_devicePanel || m_devicePanel->currentHandle() < 0) {
+        setStatus(tr("无有效设备，已跳过发送"), 5000);
+        return;
+    }
 
     unsigned char data[8] = {};
     int len = 0;
@@ -444,8 +475,10 @@ void MainWindow::onWriteListLine(int id, unsigned char check,
     }
 
     const int handle = m_devicePanel->currentHandle();
+    if (handle < 0)
+        return;
     const int ch = m_linConfig->channel();
-    const unsigned char uid = static_cast<unsigned char>(id);
+    const unsigned char uid = static_cast<unsigned char>(id & 0x3F);
     const int ret = m_lin->write(handle, ch, uid, data, len, check);
     if (ret != LIN_EX_SUCCESS) {
         setStatus(tr("主机写失败 ID=0x%1（%2）")
@@ -475,10 +508,16 @@ void MainWindow::onReadListLine(int id, unsigned char check)
 {
     if (!m_linRunning || !m_linConfig->isMaster())
         return;
+    if (!m_devicePanel || m_devicePanel->currentHandle() < 0) {
+        setStatus(tr("无有效设备，已跳过读取"), 5000);
+        return;
+    }
 
     const int handle = m_devicePanel->currentHandle();
+    if (handle < 0)
+        return;
     const int ch = m_linConfig->channel();
-    const unsigned char uid = static_cast<unsigned char>(id);
+    const unsigned char uid = static_cast<unsigned char>(id & 0x3F);
     unsigned char data[8] = {};
     const int n = m_lin->read(handle, ch, uid, data, 8);
     if (n < 0) {
@@ -512,6 +551,10 @@ void MainWindow::onReadLin()
 {
     if (!m_linRunning || !m_linConfig->isMaster())
         return;
+    if (!requireDeviceForLin()) {
+        onStopLin();
+        return;
+    }
     onReadListLine(m_linSend->sendId(), m_linSend->checkType());
 }
 
